@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache2-green.svg)](LICENSE)
 
-The Rust implementation for https://github.com/scroll-tech/zktrie
+The Rust implementation for https://github.com/scroll-tech/zktrie, using [sgxlib](https://github.com/automata-network/sgxlib) to support both Intel SGX and std environments.
 
 ## Benchmark
 
