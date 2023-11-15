@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     test_bit, to_secure_key, BranchHash, BranchType, Byte32, Database, Error, Hash, HashScheme,
-    Node, NodeValue, ZERO_HASH,
+    Node, NodeValue, PreimageDatabase, MAGIC_SMT_BYTES, ZERO_HASH,
 };
 use poseidon_rs::Fr;
 
@@ -200,7 +200,7 @@ impl<H: HashScheme> ZkTrie<H> {
         v_preimage: Vec<Byte32>,
     ) -> Result<(), Error>
     where
-        D: Database<Node = Node<H>>,
+        D: PreimageDatabase<Node = Node<H>>,
     {
         let k = to_secure_key::<H>(key)?;
         self.update_preimage(db, key, &k);
@@ -209,7 +209,12 @@ impl<H: HashScheme> ZkTrie<H> {
         Ok(())
     }
 
-    fn update_preimage<D: Database>(&mut self, db: &mut D, preimage: &[u8], hash_field: &Fr) {
+    fn update_preimage<D: PreimageDatabase>(
+        &mut self,
+        db: &mut D,
+        preimage: &[u8],
+        hash_field: &Fr,
+    ) {
         db.update_preimage(preimage, hash_field)
     }
 
@@ -242,7 +247,7 @@ impl<H: HashScheme> ZkTrie<H> {
     // GetNode gets a node by node hash from the MT.  Empty nodes are not stored in the
     // tree; they are all the same and assumed to always exist.
     // <del>for non exist key, return (NewEmptyNode(), nil)</del>
-    fn get_node<D>(&self, db: &mut D, hash: &Hash) -> Result<Option<Arc<Node<H>>>, Error>
+    pub(crate) fn get_node<D>(&self, db: &mut D, hash: &Hash) -> Result<Option<Arc<Node<H>>>, Error>
     where
         D: Database<Node = Node<H>>,
     {
@@ -451,7 +456,7 @@ impl<H: HashScheme> ZkTrie<H> {
     ) -> Result<(), Error>
     where
         D: Database<Node = Node<H>>,
-        F: FnMut(&Node<H>) -> Result<(), Error>,
+        F: FnMut(&mut D, Arc<Node<H>>) -> Result<(), Error>,
     {
         let path = get_path(self.max_level, key_hash.raw_bytes());
         let mut nodes = Vec::new();
@@ -486,9 +491,109 @@ impl<H: HashScheme> ZkTrie<H> {
                 from_level -= 1;
                 continue;
             }
-            write_node(&n)?;
+            write_node(db, n)?;
         }
         Ok(())
+    }
+
+    pub fn proof<D>(&self, db: &mut D, key: &[u8]) -> Result<Vec<Vec<u8>>, Error>
+    where
+        D: Database<Node = Node<H>>,
+    {
+        let k = to_secure_key::<H>(key)?;
+        let node_key: Hash = k.into();
+        let mut proof = Vec::new();
+        self.prove(db, &node_key.bytes(), 0, |_, node| {
+            proof.push(node.bytes());
+            Ok(())
+        })?;
+        proof.push(MAGIC_SMT_BYTES.to_vec());
+        Ok(proof)
+    }
+
+    // Prove is a simlified calling of ProveWithDeletion
+    pub fn prove<D, F>(
+        &self,
+        db: &mut D,
+        key: &[u8],
+        from_level: usize,
+        write_node: F,
+    ) -> Result<(), Error>
+    where
+        D: Database<Node = Node<H>>,
+        F: FnMut(&mut D, Arc<Node<H>>) -> Result<(), Error>,
+    {
+        type N<H> = fn(Arc<Node<H>>, Option<Arc<Node<H>>>);
+        return self.prove_with_deletion::<D, F, N<H>>(db, key, from_level, write_node, None);
+    }
+
+    // ProveWithDeletion constructs a merkle proof for key. The result contains all encoded nodes
+    // on the path to the value at key. The value itself is also included in the last
+    // node and can be retrieved by verifying the proof.
+    //
+    // If the trie does not contain a value for key, the returned proof contains all
+    // nodes of the longest existing prefix of the key (at least the root node), ending
+    // with the node that proves the absence of the key.
+    //
+    // If the trie contain value for key, the onHit is called BEFORE writeNode being called,
+    // both the hitted leaf node and its sibling node is provided as arguments so caller
+    // would receive enough information for launch a deletion and calculate the new root
+    // base on the proof data
+    // Also notice the sibling can be nil if the trie has only one leaf
+    pub fn prove_with_deletion<D, F, N>(
+        &self,
+        db: &mut D,
+        key: &[u8],
+        from_level: usize,
+        mut write_node: F,
+        mut on_hit: Option<N>,
+    ) -> Result<(), Error>
+    where
+        D: Database<Node = Node<H>>,
+        F: FnMut(&mut D, Arc<Node<H>>) -> Result<(), Error>,
+        N: Fn(Arc<Node<H>>, Option<Arc<Node<H>>>),
+    {
+        if key.len() != 32 {
+            return Err(Error::InvalidField);
+        }
+
+        let k = Hash::from_bytes(key);
+
+        let mut prev: Option<Arc<Node<H>>> = None;
+        self.walk(db, &k, from_level, |db, node| {
+            let prev_branch_node = prev
+                .as_ref()
+                .map(|n| n.branch().expect("unexpected behavior in prove"));
+
+            let on_hit = match &mut on_hit {
+                Some(on_hit) => on_hit,
+                None => {
+                    prev = Some(node.clone());
+                    return write_node(db, node);
+                }
+            };
+
+            if node.match_leaf_key(&k) {
+                match prev_branch_node {
+                    Some(prev) => {
+                        let node_hash = node.hash();
+                        let sibling = if node_hash == prev.left.hash() {
+                            prev.right.hash()
+                        } else {
+                            prev.left.hash()
+                        };
+                        match self.get_node(db, sibling) {
+                            Ok(sibling_node) => on_hit(node.clone(), sibling_node),
+                            Err(_) => on_hit(node.clone(), None),
+                        }
+                    }
+                    None => on_hit(node.clone(), None),
+                };
+            }
+
+            prev = Some(node.clone());
+            return write_node(db, node);
+        })
     }
 }
 

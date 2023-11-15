@@ -230,12 +230,10 @@ impl<H: HashScheme> Node<H> {
     }
 
     pub fn empty() -> Arc<Self> {
-        lazy_static::lazy_static!{
+        lazy_static::lazy_static! {
             static ref EMPTY: Arc<Node<()>> = Arc::new(<Node<()>>::new_empty());
         }
-        unsafe {
-            std::mem::transmute(EMPTY.clone())
-        }
+        unsafe { std::mem::transmute(EMPTY.clone()) }
     }
 
     pub fn new_empty() -> Self {
@@ -247,10 +245,24 @@ impl<H: HashScheme> Node<H> {
         }
     }
 
+    pub fn branch(&self) -> Option<&BranchNode> {
+        match &self.value {
+            NodeValue::Branch(node) => Some(node),
+            _ => None,
+        }
+    }
+
     pub fn leaf(&self) -> Option<&LeafNode> {
         match &self.value {
             NodeValue::Leaf(node) => Some(node),
             _ => None,
+        }
+    }
+
+    pub fn match_leaf_key(&self, k: &Hash) -> bool {
+        match self.leaf() {
+            Some(leaf) => &leaf.key == k,
+            None => false,
         }
     }
 
@@ -279,6 +291,10 @@ impl<H: HashScheme> Node<H> {
 
     pub fn is_branch(&self) -> bool {
         matches!(&self.value, NodeValue::Branch(_))
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        matches!(&self.value, NodeValue::Leaf(_))
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -321,16 +337,19 @@ impl<H: HashScheme> Node<H> {
     }
 
     pub fn bytes(&self) -> Vec<u8> {
-        let mut data = self.canonical_value();
-        if let NodeValue::Leaf(node) = &self.value {
-            if let Some(key) = &node.key_preimage {
-                assert!(data.len() > 0);
-                *data.last_mut().unwrap() = key.len() as u8;
-                data.extend_from_slice(&key.bytes()[..]);
-            }
-        }
-        data
+        let val = self.leaf().map(|n| n.key_preimage).flatten();
+        node_bytes(self, val)
     }
+}
+
+pub fn node_bytes<H: HashScheme>(n: &Node<H>, key_preimage: Option<Byte32>) -> Vec<u8> {
+    let mut data = n.canonical_value();
+    if let Some(key) = &key_preimage {
+        assert!(data.len() > 0);
+        *data.last_mut().unwrap() = key.len() as u8;
+        data.extend_from_slice(&key.bytes()[..]);
+    }
+    data
 }
 
 pub struct EmptyNode {}

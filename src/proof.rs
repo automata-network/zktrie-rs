@@ -3,6 +3,7 @@ use std::prelude::v1::*;
 use crate::{Error, HashScheme, Node};
 
 lazy_static::lazy_static! {
+    pub static ref MAGIC_HASH: &'static [u8] = b"THIS IS THE MAGIC INDEX FOR ZKTRIE";
     pub static ref MAGIC_SMT_BYTES: &'static [u8] = b"THIS IS SOME MAGIC BYTES FOR SMT m1rRXgP2xpDI";
 }
 

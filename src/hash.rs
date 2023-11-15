@@ -70,6 +70,7 @@ impl Hash {
         tmp.reverse();
         Some(Self(tmp))
     }
+
     #[cfg(test)]
     pub fn to_hex(&self) -> String {
         hex::encode(&self.bytes())

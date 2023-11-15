@@ -39,3 +39,6 @@ pub use crate::zktrie::*;
 mod zktrie_test;
 #[cfg(test)]
 mod zktrie_bench;
+
+mod zktrie_deletionproof;
+pub use crate::zktrie_deletionproof::*;
