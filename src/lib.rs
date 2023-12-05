@@ -5,6 +5,7 @@
 extern crate sgxlib as std;
 
 
+#[cfg(test)]
 extern crate test;
 
 pub use poseidon_rs::{Field, Fr, FrRepr, PrimeField, PrimeFieldDecodingError};
