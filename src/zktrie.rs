@@ -226,9 +226,14 @@ impl<H: HashScheme> ZkTrie<H> {
         v_preimage: Vec<Byte32>,
     ) -> Result<(), Error>
     where
-        D: Database<Node = Node<H>>,
+        D: PreimageDatabase<Node = Node<H>>,
     {
-        let new_leaf_node = <Node<H>>::new_leaf(key.clone(), v_flag, v_preimage, None)?;
+        let k_preimage = match db.preimage(&key.fr().map_err(Error::NotInField)?) {
+            preimage if preimage.len() == 32 => Some(Byte32::from_bytes_padding(&preimage)),
+            _ => None,
+        };
+
+        let new_leaf_node = <Node<H>>::new_leaf(key.clone(), v_flag, v_preimage, k_preimage)?;
         let path = get_path(self.max_level, key.raw_bytes());
 
         let root = self.root.clone();
