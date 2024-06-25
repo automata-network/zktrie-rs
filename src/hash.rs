@@ -43,8 +43,14 @@ pub trait HashScheme: PartialEq + Clone + std::fmt::Debug {
     fn hash_scheme(arr: &[Fr], domain: &Fr) -> Fr;
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord)]
+#[derive(Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord)]
 pub struct Hash([u8; 32]);
+
+impl std::fmt::Debug for Hash {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x{}", hex::encode(&self.0))
+    }
+}
 
 impl Hash {
     pub fn is_zero(&self) -> bool {
